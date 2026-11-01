@@ -1,0 +1,77 @@
+# Reduced copy of upstream chained_e2e.yml @ 6814e00: same trigger, artifact fallback,
+# always() conditions, checkout and secret-bearing npm script. Status/merge-queue jobs dropped.
+name: 'Testing: E2E (Chained)'
+
+on:
+  workflow_run:
+    workflows: ['Trigger E2E']
+    types: ['completed']
+
+permissions:
+  contents: 'read'
+
+jobs:
+  download_repo_name:
+    runs-on: 'ubuntu-latest'
+    outputs:
+      repo_name: '${{ steps.output-repo-name.outputs.repo_name }}'
+      head_sha: '${{ steps.output-repo-name.outputs.head_sha }}'
+    steps:
+      - name: 'Download the repo_name artifact'
+        uses: 'actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0' # ratchet:actions/download-artifact@v5
+        with:
+          github-token: '${{ secrets.GITHUB_TOKEN }}'
+          name: 'repo_name'
+          run-id: '${{ github.event.workflow_run.id }}'
+          path: '${{ runner.temp }}/artifacts'
+      - name: 'Output Repo Name and SHA'
+        id: 'output-repo-name'
+        uses: 'actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd' # ratchet:actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const temp = '${{ runner.temp }}/artifacts';
+            const repoPath = path.join(temp, 'repo_name');
+            if (fs.existsSync(repoPath)) {
+              core.setOutput('repo_name', String(fs.readFileSync(repoPath)).trim());
+            }
+            const shaPath = path.join(temp, 'head_sha');
+            if (fs.existsSync(shaPath)) {
+              core.setOutput('head_sha', String(fs.readFileSync(shaPath)).trim());
+            }
+
+  parse_run_context:
+    runs-on: 'ubuntu-latest'
+    needs: 'download_repo_name'
+    if: 'always()'
+    outputs:
+      repository: '${{ steps.set_context.outputs.REPO }}'
+      sha: '${{ steps.set_context.outputs.SHA }}'
+    steps:
+      - id: 'set_context'
+        env:
+          REPO: '${{ needs.download_repo_name.outputs.repo_name || github.repository }}'
+          SHA: '${{ needs.download_repo_name.outputs.head_sha || github.event.workflow_run.head_sha || github.sha }}'
+        run: |
+          echo "REPO=$REPO" >> "$GITHUB_OUTPUT"
+          echo "SHA=$SHA" >> "$GITHUB_OUTPUT"
+
+  e2e_linux:
+    runs-on: 'ubuntu-latest'
+    needs: 'parse_run_context'
+    if: 'always()'
+    steps:
+      - uses: 'actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955' # ratchet:actions/checkout@v5
+        with:
+          ref: '${{ needs.parse_run_context.outputs.sha }}'
+          repository: '${{ needs.parse_run_context.outputs.repository }}'
+          persist-credentials: false
+      - uses: 'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020' # ratchet:actions/setup-node@v4
+        with:
+          node-version: '20.x'
+      - run: 'npm ci'
+      - name: 'Run E2E tests'
+        env:
+          GEMINI_API_KEY: '${{ secrets.GEMINI_API_KEY }}'
+        run: 'npm run test:integration:sandbox:none'
