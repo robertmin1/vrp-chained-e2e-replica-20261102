@@ -1,0 +1,8 @@
+{
+  "name": "replica-base",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test:integration:sandbox:none": "node -e \"console.log('benign base test')\""
+  }
+}
